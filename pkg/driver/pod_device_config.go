@@ -35,6 +35,10 @@ type PodConfig struct {
 	// LastNRIActivity timestamp is updated whenever an NRI hook processes
 	// a container for this Pod. Used to track pod initialization progress.
 	LastNRIActivity time.Time
+
+	// NetNS is the path to the Pod's network namespace as observed by the
+	// container runtime.
+	NetNS string `json:"netns,omitempty"`
 }
 
 // DeviceConfig holds the set of configurations to be applied for a single
@@ -87,9 +91,11 @@ type LinuxDevice struct {
 // daemon restarts. Following the kubelet DRA checkpoint pattern
 // (pkg/kubelet/cm/dra/state), the in-memory PodConfigStore is the source
 // of truth and the Checkpointer is a write-through backend.
+// Note: Pod-level metadata like NetNS is not persisted (rebuilt on restart
+// via Synchronize() which queries the container runtime).
 type Checkpointer interface {
-	// GetOrCreate returns all persisted pod device configs, or an empty map
-	// if the checkpoint does not yet exist. Used at startup to restore state.
+	// GetOrCreate returns all persisted device configs. Used at startup to
+	// restore state.
 	GetOrCreate() (map[types.UID]map[string]DeviceConfig, error)
 	// Store persists the device config for a single pod/device pair.
 	Store(podUID types.UID, deviceName string, config DeviceConfig) error
@@ -110,7 +116,9 @@ type PodConfigStore struct {
 }
 
 // NewPodConfigStore creates a new PodConfigStore. If a Checkpointer is
-// provided, existing state is loaded from the checkpoint into memory.
+// provided, existing device configs are loaded from the checkpoint into memory.
+// Pod-level state is not persisted; NetNS is rebuilt through Synchronize() on
+// driver startup, while LastNRIActivity resets to its zero value.
 func NewPodConfigStore(checkpointer Checkpointer) (*PodConfigStore, error) {
 	s := &PodConfigStore{
 		configs:      make(map[types.UID]PodConfig),
@@ -253,7 +261,32 @@ func (s *PodConfigStore) GetPodConfig(podUID types.UID) (PodConfig, bool) {
 	return PodConfig{
 		DeviceConfigs:   configsCopy,
 		LastNRIActivity: podConfig.LastNRIActivity,
+		NetNS:           podConfig.NetNS,
 	}, true
+}
+
+// SetPodNetNs stores the Pod's network namespace path in the pod-level config.
+// This is in-memory only; pod NetNS is rebuilt from the container runtime on
+// driver restart via Synchronize().
+func (s *PodConfigStore) SetPodNetNs(podUID types.UID, netns string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	podCfg, ok := s.configs[podUID]
+	if !ok {
+		klog.Warningf("SetPodNetNs: pod UID %s not found in store; skipping NetNS update", podUID)
+		return
+	}
+	podCfg.NetNS = netns
+	s.configs[podUID] = podCfg
+}
+
+// GetPodNetNs returns the stored network namespace for the given pod UID.
+func (s *PodConfigStore) GetPodNetNs(podUID types.UID) (string, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	podCfg, ok := s.configs[podUID]
+	return podCfg.NetNS, ok
 }
 
 // DeleteClaim removes all configurations associated with a given claim and

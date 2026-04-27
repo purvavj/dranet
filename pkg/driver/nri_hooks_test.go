@@ -225,6 +225,69 @@ func TestSynchronizePrunesStaleConfigs(t *testing.T) {
 	}
 }
 
+func TestSynchronizeStoresNetNSOnlyForConfiguredPods(t *testing.T) {
+	store := mustNewPodConfigStore()
+
+	// Pod 1: Has device config (configured)
+	store.SetDeviceConfig("configured-pod", "eth0", DeviceConfig{}) //nolint:errcheck
+
+	// Pod 2: Does not have device config (unconfigured)
+
+	np := &NetworkDriver{
+		podConfigStore: store,
+		netdb:          inventory.New(),
+	}
+
+	pods := []*api.PodSandbox{
+		{
+			Uid:       "configured-pod",
+			Name:      "configured",
+			Namespace: "default",
+			Linux: &api.LinuxPodSandbox{
+				Namespaces: []*api.LinuxNamespace{
+					{Type: "network", Path: "/var/run/netns/configured"},
+				},
+			},
+		},
+		{
+			Uid:       "unconfigured-pod",
+			Name:      "unconfigured",
+			Namespace: "default",
+			Linux: &api.LinuxPodSandbox{
+				Namespaces: []*api.LinuxNamespace{
+					{Type: "network", Path: "/var/run/netns/unconfigured"},
+				},
+			},
+		},
+	}
+
+	_, err := np.Synchronize(context.Background(), pods, nil)
+	if err != nil {
+		t.Fatalf("Synchronize() error: %v", err)
+	}
+
+	// Case 1: Configured pod should have its NetNS stored
+	netns, found := store.GetPodNetNs("configured-pod")
+	if !found {
+		t.Error("configured-pod should have its NetNS stored")
+	}
+	if netns != "/var/run/netns/configured" {
+		t.Errorf("expected NetNS /var/run/netns/configured, got %q", netns)
+	}
+
+	// Case 2: Unconfigured pod should NOT have its NetNS stored
+	_, found = store.GetPodNetNs("unconfigured-pod")
+	if found {
+		t.Error("unconfigured-pod should NOT have its NetNS stored")
+	}
+
+	// Also verify it didn't create a skeleton config for unconfigured-pod
+	_, found = store.GetPodConfig("unconfigured-pod")
+	if found {
+		t.Error("unconfigured-pod should NOT have any PodConfig in the store")
+	}
+}
+
 func TestCreateContainerMetrics(t *testing.T) {
 	testCases := []struct {
 		name           string
