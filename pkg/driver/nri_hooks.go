@@ -51,8 +51,8 @@ func (np *NetworkDriver) Synchronize(_ context.Context, pods []*api.PodSandbox, 
 		ns := getNetworkNamespace(pod)
 		// host network pods are skipped
 		if ns != "" {
-			// store the Pod metadata in the db
-			np.netdb.AddPodNetNs(podKey(pod), ns)
+			// store the Pod network namespace in the pod config store
+			_ = np.podConfigStore.SetPodNetNs(types.UID(pod.GetUid()), ns)
 		}
 	}
 
@@ -152,8 +152,8 @@ func (np *NetworkDriver) runPodSandbox(_ context.Context, pod *api.PodSandbox, p
 	if ns == "" {
 		return fmt.Errorf("RunPodSandbox pod %s/%s using host network can not claim host devices", pod.Namespace, pod.Name)
 	}
-	// store the Pod metadata in the db
-	np.netdb.AddPodNetNs(podKey(pod), ns)
+	// store the Pod network namespace in the pod config store
+	_ = np.podConfigStore.SetPodNetNs(types.UID(pod.GetUid()), ns)
 
 	// Track all the status updates needed for the resource claims of the pod.
 	statusUpdates := map[types.NamespacedName]*resourceapply.ResourceClaimStatusApplyConfiguration{}
@@ -364,7 +364,7 @@ func (np *NetworkDriver) StopPodSandbox(ctx context.Context, pod *api.PodSandbox
 
 func (np *NetworkDriver) stopPodSandbox(_ context.Context, pod *api.PodSandbox, podConfig PodConfig) error {
 	defer func() {
-		np.netdb.RemovePodNetNs(podKey(pod))
+		_ = np.podConfigStore.SetPodNetNs(types.UID(pod.GetUid()), "")
 	}()
 	// get the pod network namespace
 	ns := getNetworkNamespace(pod)
@@ -372,7 +372,9 @@ func (np *NetworkDriver) stopPodSandbox(_ context.Context, pod *api.PodSandbox, 
 		// some version of containerd does not send the network namespace information on this hook so
 		// we workaround it using the local copy we have in the db to associate interfaces with Pods via
 		// the network namespace id.
-		ns = np.netdb.GetPodNetNs(podKey(pod))
+		if storedNs, ok := np.podConfigStore.GetPodNetNs(types.UID(pod.GetUid())); ok {
+			ns = storedNs
+		}
 		if ns == "" {
 			klog.Infof("StopPodSandbox pod %s/%s using host network ... skipping", pod.Namespace, pod.Name)
 			return nil
@@ -416,7 +418,7 @@ func (np *NetworkDriver) RemovePodSandbox(ctx context.Context, pod *api.PodSandb
 }
 
 func (np *NetworkDriver) removePodSandbox(_ context.Context, pod *api.PodSandbox) error {
-	np.netdb.RemovePodNetNs(podKey(pod))
+	_ = np.podConfigStore.SetPodNetNs(types.UID(pod.GetUid()), "")
 	return nil
 }
 

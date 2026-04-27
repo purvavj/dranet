@@ -95,22 +95,22 @@ func TestBoltCheckpointer_StoreAndGetOrCreate(t *testing.T) {
 
 func TestBoltCheckpointer_DeletePod(t *testing.T) {
 	cp := newTestBoltCheckpointer(t)
-	cp.Store("pod-1", "eth0", DeviceConfig{})
-	cp.Store("pod-2", "eth0", DeviceConfig{})
+	cp.Store(types.UID("pod-1"), "eth0", DeviceConfig{})
+	cp.Store(types.UID("pod-2"), "eth0", DeviceConfig{})
 
-	if err := cp.DeletePod("pod-1"); err != nil {
+	if err := cp.DeletePod(types.UID("pod-1")); err != nil {
 		t.Fatalf("DeletePod() error: %v", err)
 	}
 	data, _ := cp.GetOrCreate()
-	if _, ok := data["pod-1"]; ok {
+	if _, ok := data[types.UID("pod-1")]; ok {
 		t.Error("pod-1 should have been deleted")
 	}
-	if _, ok := data["pod-2"]; !ok {
+	if _, ok := data[types.UID("pod-2")]; !ok {
 		t.Error("pod-2 should still exist")
 	}
 
 	// Delete non-existent pod — should not error.
-	if err := cp.DeletePod("non-existent"); err != nil {
+	if err := cp.DeletePod(types.UID("non-existent")); err != nil {
 		t.Errorf("DeletePod(non-existent) error: %v", err)
 	}
 }
@@ -120,7 +120,7 @@ func TestBoltCheckpointer_DeviceConfigsBucketStructure(t *testing.T) {
 	config := DeviceConfig{
 		Claim: types.NamespacedName{Namespace: "ns", Name: "claim1"},
 	}
-	cp.Store("pod-1", "eth0", config)
+	cp.Store(types.UID("pod-1"), "eth0", config)
 
 	// Verify the bucket structure: pod_configs -> pod-1 -> device_configs -> eth0
 	err := cp.db.View(func(tx *bolt.Tx) error {
@@ -211,28 +211,28 @@ func TestPodConfigStore_Persistence(t *testing.T) {
 func TestPodConfigStore_DeletePodCheckpoints(t *testing.T) {
 	store, cp := newTestStoreWithBolt(t)
 
-	store.SetDeviceConfig("pod-1", "eth0", DeviceConfig{Claim: types.NamespacedName{Namespace: "ns", Name: "c1"}})
-	store.SetDeviceConfig("pod-2", "eth0", DeviceConfig{Claim: types.NamespacedName{Namespace: "ns", Name: "c1"}})
-	store.SetDeviceConfig("pod-3", "eth0", DeviceConfig{Claim: types.NamespacedName{Namespace: "ns", Name: "c2"}})
+	store.SetDeviceConfig(types.UID("pod-1"), "eth0", DeviceConfig{Claim: types.NamespacedName{Namespace: "ns", Name: "c1"}})
+	store.SetDeviceConfig(types.UID("pod-2"), "eth0", DeviceConfig{Claim: types.NamespacedName{Namespace: "ns", Name: "c1"}})
+	store.SetDeviceConfig(types.UID("pod-3"), "eth0", DeviceConfig{Claim: types.NamespacedName{Namespace: "ns", Name: "c2"}})
 
-	store.DeletePod("pod-1")
+	store.DeletePod(types.UID("pod-1"))
 
 	// Verify deleted from bolt.
 	data, _ := cp.GetOrCreate()
-	if _, ok := data["pod-1"]; ok {
+	if _, ok := data[types.UID("pod-1")]; ok {
 		t.Error("pod-1 should have been deleted from checkpoint")
 	}
-	if _, ok := data["pod-2"]; !ok {
+	if _, ok := data[types.UID("pod-2")]; !ok {
 		t.Error("pod-2 should still be in checkpoint")
 	}
 
 	// DeleteClaim should propagate.
 	store.DeleteClaim(types.NamespacedName{Namespace: "ns", Name: "c1"})
 	data, _ = cp.GetOrCreate()
-	if _, ok := data["pod-2"]; ok {
+	if _, ok := data[types.UID("pod-2")]; ok {
 		t.Error("pod-2 should have been deleted from checkpoint via DeleteClaim")
 	}
-	if _, ok := data["pod-3"]; !ok {
+	if _, ok := data[types.UID("pod-3")]; !ok {
 		t.Error("pod-3 should still be in checkpoint")
 	}
 }
@@ -385,3 +385,4 @@ func TestPodConfigStore_NoCheckpointer(t *testing.T) {
 		t.Errorf("Close() error: %v", err)
 	}
 }
+
