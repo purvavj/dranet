@@ -37,9 +37,7 @@ type PodConfig struct {
 	LastNRIActivity time.Time
 
 	// NetNS is the path to the Pod's network namespace as observed by the
-	// container runtime. This is stored here so pod-level state (like the
-	// pod network namespace) is colocated with device configs. It is not
-	// persisted and is rebuilt on restart via Synchronize().
+	// container runtime.
 	NetNS string `json:"netns,omitempty"`
 }
 
@@ -119,8 +117,8 @@ type PodConfigStore struct {
 
 // NewPodConfigStore creates a new PodConfigStore. If a Checkpointer is
 // provided, existing device configs are loaded from the checkpoint into memory.
-// Pod-level state (NetNS, LastNRIActivity) is not persisted and is rebuilt
-// through Synchronize() on driver startup.
+// Pod-level state is not persisted; NetNS is rebuilt through Synchronize() on
+// driver startup, while LastNRIActivity resets to its zero value.
 func NewPodConfigStore(checkpointer Checkpointer) (*PodConfigStore, error) {
 	s := &PodConfigStore{
 		configs:      make(map[types.UID]PodConfig),
@@ -247,7 +245,7 @@ func (s *PodConfigStore) ListPods() []types.UID {
 }
 
 // GetPodConfig retrieves all configurations for a given Pod UID.
-// It returns a deep copy of the PodConfig to prevent external modification.
+// It is indexed by the Pod's UID.
 func (s *PodConfigStore) GetPodConfig(podUID types.UID) (PodConfig, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -270,14 +268,13 @@ func (s *PodConfigStore) GetPodConfig(podUID types.UID) (PodConfig, bool) {
 // SetPodNetNs stores the Pod's network namespace path in the pod-level config.
 // This is in-memory only; pod NetNS is rebuilt from the container runtime on
 // driver restart via Synchronize().
-func (s *PodConfigStore) SetPodNetNs(podUID types.UID, netns string) error {
+func (s *PodConfigStore) SetPodNetNs(podUID types.UID, netns string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	podCfg, _ := s.configs[podUID]
 	podCfg.NetNS = netns
 	s.configs[podUID] = podCfg
-	return nil
 }
 
 // GetPodNetNs returns the stored network namespace for the given pod UID.

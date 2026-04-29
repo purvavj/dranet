@@ -176,6 +176,7 @@ func TestPodConfigStore_Persistence(t *testing.T) {
 		t.Fatalf("NewPodConfigStore() error: %v", err)
 	}
 	store1.SetDeviceConfig("pod-1", "eth0", config)
+	store1.SetPodNetNs("pod-1", "/var/run/netns/test-ns")
 	store1.Close()
 
 	// Reopen and verify data was restored from checkpoint.
@@ -204,6 +205,11 @@ func TestPodConfigStore_Persistence(t *testing.T) {
 	if len(podConfig.DeviceConfigs) != 1 {
 		t.Errorf("Expected 1 device config after reopen, got %d", len(podConfig.DeviceConfigs))
 	}
+
+	// Verify NetNS is NOT restored (in-memory only)
+	if podConfig.NetNS != "" {
+		t.Errorf("Expected NetNS to be empty after reopen, but got %s", podConfig.NetNS)
+	}
 }
 
 // TestPodConfigStore_DeletePodCheckpoints verifies that DeletePod and
@@ -211,28 +217,28 @@ func TestPodConfigStore_Persistence(t *testing.T) {
 func TestPodConfigStore_DeletePodCheckpoints(t *testing.T) {
 	store, cp := newTestStoreWithBolt(t)
 
-	store.SetDeviceConfig(types.UID("pod-1"), "eth0", DeviceConfig{Claim: types.NamespacedName{Namespace: "ns", Name: "c1"}})
-	store.SetDeviceConfig(types.UID("pod-2"), "eth0", DeviceConfig{Claim: types.NamespacedName{Namespace: "ns", Name: "c1"}})
-	store.SetDeviceConfig(types.UID("pod-3"), "eth0", DeviceConfig{Claim: types.NamespacedName{Namespace: "ns", Name: "c2"}})
+	store.SetDeviceConfig("pod-1", "eth0", DeviceConfig{Claim: types.NamespacedName{Namespace: "ns", Name: "c1"}})
+	store.SetDeviceConfig("pod-2", "eth0", DeviceConfig{Claim: types.NamespacedName{Namespace: "ns", Name: "c1"}})
+	store.SetDeviceConfig("pod-3", "eth0", DeviceConfig{Claim: types.NamespacedName{Namespace: "ns", Name: "c2"}})
 
-	store.DeletePod(types.UID("pod-1"))
+	store.DeletePod("pod-1")
 
 	// Verify deleted from bolt.
 	data, _ := cp.GetOrCreate()
-	if _, ok := data[types.UID("pod-1")]; ok {
+	if _, ok := data["pod-1"]; ok {
 		t.Error("pod-1 should have been deleted from checkpoint")
 	}
-	if _, ok := data[types.UID("pod-2")]; !ok {
+	if _, ok := data["pod-2"]; !ok {
 		t.Error("pod-2 should still be in checkpoint")
 	}
 
 	// DeleteClaim should propagate.
 	store.DeleteClaim(types.NamespacedName{Namespace: "ns", Name: "c1"})
 	data, _ = cp.GetOrCreate()
-	if _, ok := data[types.UID("pod-2")]; ok {
+	if _, ok := data["pod-2"]; ok {
 		t.Error("pod-2 should have been deleted from checkpoint via DeleteClaim")
 	}
-	if _, ok := data[types.UID("pod-3")]; !ok {
+	if _, ok := data["pod-3"]; !ok {
 		t.Error("pod-3 should still be in checkpoint")
 	}
 }

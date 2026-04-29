@@ -107,6 +107,46 @@ func TestPodConfigStore_SetAndGet(t *testing.T) {
 	}
 }
 
+// TestPodConfigStore_NetNs verifies that NetNS path can be stored and retrieved correctly in memory.
+func TestPodConfigStore_NetNs(t *testing.T) {
+	store := mustNewPodConfigStore()
+	podUID := types.UID("test-pod-uid-1")
+	netns := "/var/run/netns/test-ns"
+
+	// Test Get on non-existent item
+	_, found := store.GetPodNetNs(podUID)
+	if found {
+		t.Errorf("GetPodNetNs() found a netns before SetPodNetNs(), expected not found")
+	}
+
+	store.SetPodNetNs(podUID, netns)
+
+	retrievedNetNs, found := store.GetPodNetNs(podUID)
+	if !found {
+		t.Fatalf("GetPodNetNs() did not find netns after SetPodNetNs(), expected found")
+	}
+	if retrievedNetNs != netns {
+		t.Errorf("GetPodNetNs() retrieved %s, want %s", retrievedNetNs, netns)
+	}
+
+	// Test Get with different podUID
+	_, found = store.GetPodNetNs(types.UID("other-pod-uid"))
+	if found {
+		t.Errorf("GetPodNetNs() found netns for wrong podUID, expected not found")
+	}
+
+	// Test overwriting
+	newNetNs := "/var/run/netns/new-ns"
+	store.SetPodNetNs(podUID, newNetNs)
+	retrievedNetNs, found = store.GetPodNetNs(podUID)
+	if !found {
+		t.Fatalf("GetPodNetNs() did not find netns after overwrite, expected found")
+	}
+	if retrievedNetNs != newNetNs {
+		t.Errorf("GetPodNetNs() retrieved %s after overwrite, want %s", retrievedNetNs, newNetNs)
+	}
+}
+
 func TestPodConfigStore_DeletePod(t *testing.T) {
 	store := mustNewPodConfigStore()
 	podUID1 := types.UID("test-pod-uid-1")
