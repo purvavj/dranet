@@ -51,8 +51,10 @@ func (np *NetworkDriver) Synchronize(_ context.Context, pods []*api.PodSandbox, 
 		ns := getNetworkNamespace(pod)
 		// host network pods are skipped
 		if ns != "" {
-			// store the Pod network namespace in the pod config store
-			_ = np.podConfigStore.SetPodNetNs(types.UID(pod.GetUid()), ns)
+			// Only store NetNS if this pod actually has a device configuration!
+			if _, ok := np.podConfigStore.GetPodConfig(types.UID(pod.GetUid())); ok {
+				_ = np.podConfigStore.SetPodNetNs(types.UID(pod.GetUid()), ns)
+			}
 		}
 	}
 
@@ -363,9 +365,6 @@ func (np *NetworkDriver) StopPodSandbox(ctx context.Context, pod *api.PodSandbox
 }
 
 func (np *NetworkDriver) stopPodSandbox(_ context.Context, pod *api.PodSandbox, podConfig PodConfig) error {
-	defer func() {
-		_ = np.podConfigStore.SetPodNetNs(types.UID(pod.GetUid()), "")
-	}()
 	// get the pod network namespace
 	ns := getNetworkNamespace(pod)
 	if ns == "" {
@@ -418,7 +417,6 @@ func (np *NetworkDriver) RemovePodSandbox(ctx context.Context, pod *api.PodSandb
 }
 
 func (np *NetworkDriver) removePodSandbox(_ context.Context, pod *api.PodSandbox) error {
-	_ = np.podConfigStore.SetPodNetNs(types.UID(pod.GetUid()), "")
 	return nil
 }
 

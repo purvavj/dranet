@@ -274,10 +274,7 @@ func (s *PodConfigStore) SetPodNetNs(podUID types.UID, netns string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	podCfg, ok := s.configs[podUID]
-	if !ok {
-		podCfg = PodConfig{DeviceConfigs: make(map[string]DeviceConfig)}
-	}
+	podCfg, _ := s.configs[podUID]
 	podCfg.NetNS = netns
 	s.configs[podUID] = podCfg
 	return nil

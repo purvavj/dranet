@@ -68,8 +68,6 @@ type DB struct {
 	gwInterfaces sets.Set[string]
 
 	mu sync.RWMutex
-	// (pod-level network namespace storage moved to PodConfigStore in the
-	// driver package to consolidate pod-level state and persistence.)
 	// deviceStore is an in-memory cache of the available devices on the node.
 	// It is keyed by the normalized PCI address of the device. The value is a
 	// resourceapi.Device object that contains the device's attributes.
@@ -145,9 +143,6 @@ func New(opts ...Option) *DB {
 	}
 	return db
 }
-
-// Pod network namespace state was moved to the podConfigStore in the driver
-// package. Inventory no longer tracks per-pod namespaces.
 
 func (db *DB) Run(ctx context.Context) error {
 	defer close(db.notifications)
