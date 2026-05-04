@@ -13,7 +13,7 @@ spec:
           count: 1
       - name: efa
         exactly:
-          deviceClassName: efa-rdma
+          deviceClassName: efa.networking.k8s.aws
           count: 1
 ---
 # Aligned: GPU and EFA are co-located on the same PCIe root complex
@@ -31,7 +31,7 @@ spec:
           count: 1
       - name: efa
         exactly:
-          deviceClassName: efa-rdma
+          deviceClassName: efa.networking.k8s.aws
           count: 1
       constraints:
       - requests: [gpu, efa]

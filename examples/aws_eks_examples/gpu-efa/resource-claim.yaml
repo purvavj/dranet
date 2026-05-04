@@ -23,7 +23,7 @@ spec:
     - exactly:
         allocationMode: ExactCount
         count: 1
-        deviceClassName: efa-rdma
+        deviceClassName: efa.networking.k8s.aws
       name: efa
 status:
   allocation:

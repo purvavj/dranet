@@ -4,6 +4,13 @@ End-to-end example of topology-aware GPU + EFA allocation using
 [Dynamic Resource Allocation (DRA)](https://kubernetes.io/docs/concepts/scheduling-eviction/dynamic-resource-allocation/)
 on Amazon EKS with [p4d.24xlarge](https://aws.amazon.com/ec2/instance-types/p4/) instances with [Nvidia A100 GPU](https://www.nvidia.com/en-us/data-center/a100/).
 
+The walkthrough uses `p4d.24xlarge` for concreteness, but the same pattern
+applies to any EKS node with NVIDIA GPUs and EFA devices (e.g. `p4de`, `p5`,
+`p5e`, `p6-b200`, `g5`/`g6` families). The number of GPUs, EFA adapters, and
+PCIe roots will differ per instance type, but the
+`resource.kubernetes.io/pcieRoot` co-selection in the
+`ResourceClaimTemplate` is unchanged.
+
 ## Context
 
 ### VM: p4d.24xlarge
@@ -61,9 +68,10 @@ ResourceSlice objects from a live node.
 |---|---|
 | `resource-claim-template.yaml` | `ResourceClaimTemplate` examples for aligned and unaligned GPU + EFA allocation |
 | `mpi-job.yaml` | `MPIJob` that runs `all_reduce_perf` across 2 workers via EFA |
+| `device-class.yaml` | `DeviceClass` for EFA (reference; installed by the `aws-dranet` Helm chart) |
 | `resourceslice-gpu.yaml` | Live GPU `ResourceSlice` from a p4d.24xlarge node (reference) |
 | `resourceslice-dranet.yaml` | Live NIC `ResourceSlice` from a p4d.24xlarge node (reference) |
-| `resourceclaim.yaml` | Example allocated `ResourceClaim` showing GPU + EFA binding (reference) |
+| `resource-claim.yaml` | Example allocated `ResourceClaim` showing GPU + EFA binding (reference) |
 
 ## ResourceClaimTemplates
 
@@ -75,6 +83,9 @@ ResourceSlice objects from a live node.
 | `gpu-efa-unaligned` | Requests 1 GPU + 1 EFA without the topology constraint, allowing cross-PCIe placement for comparison. |
 
 ## Prerequisites
+
+EKS 1.34+ with EFA-enabled worker nodes. See the AWS docs for cluster and
+node setup: [Manage EFA devices on Amazon EKS](https://docs.aws.amazon.com/eks/latest/userguide/device-management-efa.html).
 
 ```bash
 # Install MPI Operator
@@ -93,11 +104,23 @@ helm install nvidia-dra-driver-gpu nvidia/nvidia-dra-driver-gpu \
   --set 'kubeletPlugin.tolerations[0].operator=Exists' \
   --set 'kubeletPlugin.tolerations[0].effect=NoSchedule'
 
+# Install the EFA DRA driver (dranet) using the AWS-supported Helm chart.
+# Reference: https://docs.aws.amazon.com/eks/latest/userguide/device-management-efa.html#efa-dra-driver
+# The chart provisions the ServiceAccount, ClusterRole, ClusterRoleBinding,
+# DaemonSet, and the `efa.networking.k8s.aws` DeviceClass. The DaemonSet
+# filters ResourceSlices to only publish EFA devices, and the DeviceClass
+# selects them via a CEL expression on `dra.net/pciDevice`.
+helm repo add eks https://aws.github.io/eks-charts
+helm repo update
+helm install aws-dranet eks/aws-dranet --namespace kube-system
+
 # Label GPU nodes (if NFD is not installed)
 kubectl label node <gpu-node> nvidia.com/gpu.present=true
 ```
 
-Ensure the `efa-rdma` `DeviceClass` exists before applying the demo manifests.
+The `aws-dranet` chart creates the `efa.networking.k8s.aws` `DeviceClass`
+referenced by `resource-claim-template.yaml`. See `device-class.yaml` for
+the manifest the chart installs.
 
 ## Usage
 
