@@ -59,6 +59,12 @@ var (
 	// ignoredInterfaceNames is a set of network interface names that are typically
 	// created by CNI plugins or are otherwise not relevant for DRA resource exposure.
 	ignoredInterfaceNames = sets.New("cilium_net", "cilium_host", "docker0")
+
+	// nonNetdevDrivers is the set of well-known kernel drivers that bind
+	// to PCI network devices without creating a kernel netdev or RDMA link
+	// (userspace I/O and passthrough drivers). See
+	// isAllocatableNetworkDevice for why this list is used.
+	nonNetdevDrivers = sets.New("vfio-pci", "uio_pci_generic", "igb_uio", "pci-stub")
 )
 
 type DB struct {
@@ -280,6 +286,10 @@ func (db *DB) discoverPCIDevices() []resourceapi.Device {
 
 	for _, pciDev := range pci.Devices {
 		if !isNetworkDevice(pciDev) {
+			continue
+		}
+		if !isAllocatableNetworkDevice(pciDev) {
+			klog.Warningf("PCI network device %s is bound to driver %q which does not provide a netdev; not publishing it", pciDev.Address, pciDev.Driver)
 			continue
 		}
 		device := resourceapi.Device{
@@ -605,4 +615,32 @@ func (db *DB) GetRDMADeviceName(deviceName string) (string, error) {
 // https://pcisig.com/sites/default/files/files/PCI_Code-ID_r_1_11__v24_Jan_2019.pdf
 func isNetworkDevice(dev *ghw.PCIDevice) bool {
 	return dev.Class.ID == "02"
+}
+
+// isAllocatableNetworkDevice reports whether dranet can ever prepare this
+// PCI network device for a pod. A device that is allocatable is either
+// providing a kernel netdev or RDMA link in some namespace; a device that is
+// not has nothing dranet can move and would trap any pod allocated to it in
+// FailedPrepareDynamicResources.
+//
+// The natural test would be "does /sys/bus/pci/devices/$BDF/net have any
+// entries", but those entries are netns-tagged and only visible from the
+// namespace the netdev currently lives in (see the kernel's
+// Documentation/networking/sysfs-tagging.rst). A device whose netdev has
+// already been moved into a pod's namespace therefore looks identical from
+// the host to a device whose driver creates no netdev at all, and we must
+// keep publishing the former so Cluster Autoscaler can size new nodes from
+// the running ResourceSlice.
+//
+// The kernel driver bound at /sys/bus/pci/devices/$BDF/driver is the one
+// signal that distinguishes the two: it is not namespaced and stays bound
+// while the netdev is in another namespace. We treat the device as not
+// allocatable if no driver is bound, or if the bound driver is one of the
+// well-known userspace/passthrough drivers that never create a netdev or
+// RDMA link.
+func isAllocatableNetworkDevice(dev *ghw.PCIDevice) bool {
+	if dev.Driver == "" {
+		return false
+	}
+	return !nonNetdevDrivers.Has(dev.Driver)
 }
