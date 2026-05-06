@@ -40,6 +40,11 @@ e2e-test:
 lint:
 	hack/lint.sh
 
+# Run website development server
+.PHONY: serve-site
+serve-site:
+	hack/serve-site.sh
+
 helm-lint:
 	helm lint --strict deployments/helm/dranet
 
