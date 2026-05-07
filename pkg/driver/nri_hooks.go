@@ -378,21 +378,57 @@ func (np *NetworkDriver) stopPodSandbox(_ context.Context, pod *api.PodSandbox, 
 			return nil
 		}
 	}
+	needsRescan := false
 	for deviceName, config := range podConfig.DeviceConfigs {
-		ifName := config.NetworkInterfaceConfigInPod.Interface.Name
-		if ifName != "" {
-			if err := nsDetachNetdev(ns, ifName, config.NetworkInterfaceConfigInHost.Interface.Name); err != nil {
-				klog.Infof("fail to return network device %s : %v", deviceName, err)
+		// Move the RDMA device back to the host namespace BEFORE the netdev.
+		// nsDetachNetdev calls LinkSetUp on the VF in the host namespace, which
+		// triggers a NEWLINK event causing the inventory to rescan. If the RDMA
+		// device is still in the pod namespace at that point it will not be
+		// detected, so it must be returned first.
+		rdmaDetached := false
+		if !np.rdmaSharedMode && config.RDMADevice.LinkDev != "" {
+			if err := nsDetachRdmadev(ns, config.RDMADevice.LinkDev); err != nil {
+				klog.Errorf("fail to return rdma device %s : %v", deviceName, err)
+			} else {
+				rdmaDetached = true
 			}
 		}
 
-		if !np.rdmaSharedMode && config.RDMADevice.LinkDev != "" {
-			if err := nsDetachRdmadev(ns, config.RDMADevice.LinkDev); err != nil {
-				klog.Infof("fail to return rdma device %s : %v", deviceName, err)
+		netdevDetached := false
+		ifName := config.NetworkInterfaceConfigInPod.Interface.Name
+		if ifName != "" {
+			if err := nsDetachNetdev(ns, ifName, config.NetworkInterfaceConfigInHost.Interface.Name); err != nil {
+				klog.Errorf("fail to return network device %s : %v", deviceName, err)
+			} else {
+				netdevDetached = true
 			}
 		}
+
+		if needsRescanAfterDetach(rdmaDetached, netdevDetached) {
+			needsRescan = true
+		}
+	}
+	if needsRescan {
+		np.netdb.RequestRescan()
 	}
 	return nil
+}
+
+// needsRescanAfterDetach reports whether the inventory needs an explicit
+// rescan after returning a device's RDMA / netdev to init_net.
+//
+// The netdev path's NEWLINK (emitted by nsDetachNetdev's LinkSetUp) acts as
+// an implicit rescan trigger for the inventory. RDMA returns to init_net do
+// not produce an event the inventory observes, so an explicit rescan is
+// needed only when RDMA was successfully returned but the netdev path did
+// not fire NEWLINK — that is, IB-only devices (no netdev to detach) or
+// SR-IOV pods where nsDetachNetdev failed.
+//
+// Failure cases for the RDMA detach fall back to the inventory's periodic
+// poll because the device is still in the pod namespace and a rescan now
+// would not observe any state change.
+func needsRescanAfterDetach(rdmaDetached, netdevDetached bool) bool {
+	return rdmaDetached && !netdevDetached
 }
 
 func (np *NetworkDriver) RemovePodSandbox(ctx context.Context, pod *api.PodSandbox) error {

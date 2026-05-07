@@ -462,6 +462,122 @@ func TestStopPodSandboxMetrics(t *testing.T) {
 	}
 }
 
+// TestNeedsRescanAfterDetach checks the gating logic that decides whether
+// stopPodSandbox needs to fire an explicit inventory rescan after returning
+// a device's RDMA / netdev to init_net.
+func TestNeedsRescanAfterDetach(t *testing.T) {
+	testCases := []struct {
+		name           string
+		rdmaDetached   bool
+		netdevDetached bool
+		want           bool
+	}{
+		{
+			name:           "neither detached: nothing new in init_net",
+			rdmaDetached:   false,
+			netdevDetached: false,
+			want:           false,
+		},
+		{
+			name:           "netdev only: NEWLINK covers any rescan need",
+			rdmaDetached:   false,
+			netdevDetached: true,
+			want:           false,
+		},
+		{
+			name:           "RDMA only (IB-only success, or SR-IOV with netdev failure): rescan needed",
+			rdmaDetached:   true,
+			netdevDetached: false,
+			want:           true,
+		},
+		{
+			name:           "both detached (SR-IOV success): NEWLINK covers it",
+			rdmaDetached:   true,
+			netdevDetached: true,
+			want:           false,
+		},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := needsRescanAfterDetach(tc.rdmaDetached, tc.netdevDetached); got != tc.want {
+				t.Errorf("needsRescanAfterDetach(%v, %v) = %v, want %v",
+					tc.rdmaDetached, tc.netdevDetached, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestStopPodSandboxRescanGating verifies the integration paths in
+// stopPodSandbox where a rescan must NOT be requested. The success path
+// (where a detach actually completes) cannot be exercised here because the
+// real netlink calls fail against synthetic netns paths; that condition is
+// covered by TestNeedsRescanAfterDetach.
+func TestStopPodSandboxRescanGating(t *testing.T) {
+	testCases := []struct {
+		name              string
+		setupDeviceConfig bool
+		deviceConfig      DeviceConfig
+		setupNetNs        bool
+		rdmaSharedMode    bool
+	}{
+		{
+			name:              "no device config: early return at NRI level",
+			setupDeviceConfig: false,
+			setupNetNs:        true,
+		},
+		{
+			name:              "host network pod: stopPodSandbox skips before the loop",
+			setupDeviceConfig: true,
+			deviceConfig:      DeviceConfig{RDMADevice: RDMAConfig{LinkDev: "mlx5_0"}},
+			setupNetNs:        false,
+		},
+		{
+			name:              "shared RDMA mode: RDMA branch is skipped",
+			setupDeviceConfig: true,
+			deviceConfig:      DeviceConfig{RDMADevice: RDMAConfig{LinkDev: "mlx5_0"}},
+			setupNetNs:        true,
+			rdmaSharedMode:    true,
+		},
+		{
+			name:              "exclusive RDMA + fake netns: detach fails, no rescan",
+			setupDeviceConfig: true,
+			deviceConfig:      DeviceConfig{RDMADevice: RDMAConfig{LinkDev: "mlx5_0"}},
+			setupNetNs:        true,
+		},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			nriPluginRequestsTotal.Reset()
+			nriPluginRequestsLatencySeconds.Reset()
+			netdb := newFakeInventoryDB()
+			np := &NetworkDriver{
+				podConfigStore: mustNewPodConfigStore(),
+				netdb:          netdb,
+				rdmaSharedMode: tc.rdmaSharedMode,
+			}
+			podUID := types.UID("test-pod")
+			pod := &api.PodSandbox{
+				Uid:       string(podUID),
+				Name:      "test-pod",
+				Namespace: "test-ns",
+			}
+			if tc.setupDeviceConfig {
+				np.podConfigStore.SetDeviceConfig(podUID, "eth0", tc.deviceConfig)
+			}
+			if tc.setupNetNs {
+				netdb.AddPodNetNs(podKey(pod), "/dummy/netns")
+			}
+
+			if err := np.StopPodSandbox(context.Background(), pod); err != nil {
+				t.Fatalf("StopPodSandbox() error = %v", err)
+			}
+			if got := netdb.rescanCalls.Load(); got != 0 {
+				t.Errorf("RequestRescan call count = %d, want 0", got)
+			}
+		})
+	}
+}
+
 func TestRemovePodSandboxMetrics(t *testing.T) {
 	testCases := []struct {
 		name           string
