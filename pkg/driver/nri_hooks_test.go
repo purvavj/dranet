@@ -628,7 +628,10 @@ func TestStopPodSandboxRescanGating(t *testing.T) {
 				np.podConfigStore.SetDeviceConfig(podUID, "eth0", tc.deviceConfig)
 			}
 			if tc.setupNetNs {
-				netdb.AddPodNetNs(podKey(pod), "/dummy/netns")
+				if !tc.setupDeviceConfig {
+					np.podConfigStore.SetDeviceConfig(podUID, "dummy-dev", DeviceConfig{})
+				}
+				np.podConfigStore.SetPodNetNs(podUID, "/dummy/netns")
 			}
 
 			if err := np.StopPodSandbox(context.Background(), pod); err != nil {
