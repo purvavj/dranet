@@ -274,9 +274,10 @@ func (s *PodConfigStore) SetPodNetNs(podUID types.UID, netns string) {
 
 	podCfg, ok := s.configs[podUID]
 	if !ok {
-		klog.Warningf("SetPodNetNs: pod UID %s not found in store; skipping NetNS update", podUID)
+		klog.Errorf("SetPodNetNs: pod UID %s not found in store; skipping NetNS update", podUID)
 		return
 	}
+	klog.V(3).Infof("SetPodNetNs: setting NetNS for pod %s to %q", podUID, netns)
 	podCfg.NetNS = netns
 	s.configs[podUID] = podCfg
 }

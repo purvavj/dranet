@@ -56,9 +56,7 @@ func (np *NetworkDriver) Synchronize(_ context.Context, pods []*api.PodSandbox, 
 		ns, isLive := livePodNetNs[storedUID]
 
 		if isLive {
-			if ns != "" {
-				np.podConfigStore.SetPodNetNs(storedUID, ns)
-			}
+			np.podConfigStore.SetPodNetNs(storedUID, ns)
 		} else {
 			klog.Infof("Synchronize: pruning stale config for pod %s", storedUID)
 			np.podConfigStore.DeletePod(storedUID)
@@ -370,18 +368,16 @@ func (np *NetworkDriver) stopPodSandbox(_ context.Context, pod *api.PodSandbox, 
 		// we workaround it using the local copy we have in the db to associate interfaces with Pods via
 		// the network namespace id.
 		storedNs, ok := np.podConfigStore.GetPodNetNs(types.UID(pod.GetUid()))
-		if ok {
-			if storedNs != "" {
-				ns = storedNs
-			} else {
-				// Pod is not configured for DRAnet (host network or other driver)
-				klog.Infof("StopPodSandbox pod %s/%s using host network ... skipping", pod.Namespace, pod.Name)
-				return nil
-			}
-		} else {
+		if !ok {
 			klog.Warningf("StopPodSandbox: pod %s/%s (UID %s) not found in podConfigStore when fetching fallback NetNS", pod.Namespace, pod.Name, pod.Uid)
 			return nil
 		}
+		if storedNs == "" {
+			// Pod is not configured for DRAnet (host network or other driver)
+			klog.Infof("StopPodSandbox pod %s/%s using host network ... skipping", pod.Namespace, pod.Name)
+			return nil
+		}
+		ns = storedNs
 	}
 	needsRescan := false
 	for deviceName, config := range podConfig.DeviceConfigs {
