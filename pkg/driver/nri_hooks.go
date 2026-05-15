@@ -367,17 +367,11 @@ func (np *NetworkDriver) stopPodSandbox(_ context.Context, pod *api.PodSandbox, 
 		// some version of containerd does not send the network namespace information on this hook so
 		// we workaround it using the local copy we have in the db to associate interfaces with Pods via
 		// the network namespace id.
-		storedNs, ok := np.podConfigStore.GetPodNetNs(types.UID(pod.GetUid()))
-		if !ok {
-			klog.Warningf("StopPodSandbox: pod %s/%s (UID %s) not found in podConfigStore when fetching fallback NetNS", pod.Namespace, pod.Name, pod.Uid)
+		if podConfig.NetNS == "" {
+			klog.Warningf("StopPodSandbox: network namespace for DRANET pod %s/%s (UID %s) is unknown; skipping explicit device detach and relying on kernel netns teardown", pod.Namespace, pod.Name, pod.Uid)
 			return nil
 		}
-		if storedNs == "" {
-			// Pod is not configured for DRAnet (host network or other driver)
-			klog.Infof("StopPodSandbox pod %s/%s using host network ... skipping", pod.Namespace, pod.Name)
-			return nil
-		}
-		ns = storedNs
+		ns = podConfig.NetNS
 	}
 	needsRescan := false
 	for deviceName, config := range podConfig.DeviceConfigs {

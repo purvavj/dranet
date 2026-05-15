@@ -267,23 +267,23 @@ func TestSynchronizeStoresNetNSOnlyForConfiguredPods(t *testing.T) {
 	}
 
 	// Case 1: Configured pod should have its NetNS stored
-	netns, found := store.GetPodNetNs("configured-pod")
-	if !found {
-		t.Error("configured-pod should have its NetNS stored")
+	podConfig1, found1 := store.GetPodConfig("configured-pod")
+	if !found1 {
+		t.Error("configured-pod should have its config stored")
 	}
-	if netns != "/var/run/netns/configured" {
-		t.Errorf("expected NetNS /var/run/netns/configured, got %q", netns)
+	if podConfig1.NetNS != "/var/run/netns/configured" {
+		t.Errorf("expected NetNS /var/run/netns/configured, got %q", podConfig1.NetNS)
 	}
 
 	// Case 2: Unconfigured pod should NOT have its NetNS stored
-	_, found = store.GetPodNetNs("unconfigured-pod")
-	if found {
+	podConfig2, found2 := store.GetPodConfig("unconfigured-pod")
+	if found2 && podConfig2.NetNS != "" {
 		t.Error("unconfigured-pod should NOT have its NetNS stored")
 	}
 
 	// Also verify it didn't create a skeleton config for unconfigured-pod
-	_, found = store.GetPodConfig("unconfigured-pod")
-	if found {
+	_, found3 := store.GetPodConfig("unconfigured-pod")
+	if found3 {
 		t.Error("unconfigured-pod should NOT have any PodConfig in the store")
 	}
 }
@@ -586,7 +586,7 @@ func TestStopPodSandboxRescanGating(t *testing.T) {
 		{
 			name:              "no device config: early return at NRI level",
 			setupDeviceConfig: false,
-			setupNetNs:        true,
+			setupNetNs:        false,
 		},
 		{
 			name:              "host network pod: stopPodSandbox skips before the loop",
@@ -627,10 +627,7 @@ func TestStopPodSandboxRescanGating(t *testing.T) {
 			if tc.setupDeviceConfig {
 				np.podConfigStore.SetDeviceConfig(podUID, "eth0", tc.deviceConfig)
 			}
-			if tc.setupNetNs {
-				if !tc.setupDeviceConfig {
-					np.podConfigStore.SetDeviceConfig(podUID, "dummy-dev", DeviceConfig{})
-				}
+			if tc.setupDeviceConfig && tc.setupNetNs {
 				np.podConfigStore.SetPodNetNs(podUID, "/dummy/netns")
 			}
 

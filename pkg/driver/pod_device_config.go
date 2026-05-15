@@ -38,7 +38,7 @@ type PodConfig struct {
 
 	// NetNS is the path to the Pod's network namespace as observed by the
 	// container runtime.
-	NetNS string `json:"netns,omitempty"`
+	NetNS string
 }
 
 // DeviceConfig holds the set of configurations to be applied for a single
@@ -94,8 +94,8 @@ type LinuxDevice struct {
 // Note: Pod-level metadata like NetNS is not persisted (rebuilt on restart
 // via Synchronize() which queries the container runtime).
 type Checkpointer interface {
-	// GetOrCreate returns all persisted device configs. Used at startup to
-	// restore state.
+	// GetOrCreate returns all persisted pod device configs, or an empty map
+	// if the checkpoint does not yet exist. Used at startup to restore state.
 	GetOrCreate() (map[types.UID]map[string]DeviceConfig, error)
 	// Store persists the device config for a single pod/device pair.
 	Store(podUID types.UID, deviceName string, config DeviceConfig) error
@@ -280,14 +280,6 @@ func (s *PodConfigStore) SetPodNetNs(podUID types.UID, netns string) {
 	klog.V(3).Infof("SetPodNetNs: setting NetNS for pod %s to %q", podUID, netns)
 	podCfg.NetNS = netns
 	s.configs[podUID] = podCfg
-}
-
-// GetPodNetNs returns the stored network namespace for the given pod UID.
-func (s *PodConfigStore) GetPodNetNs(podUID types.UID) (string, bool) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	podCfg, ok := s.configs[podUID]
-	return podCfg.NetNS, ok
 }
 
 // DeleteClaim removes all configurations associated with a given claim and
